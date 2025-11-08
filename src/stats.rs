@@ -63,6 +63,10 @@ pub struct AlnStats<'a> {
     pub feature_stats: FxHashMap<&'a str, FeatureStats>,
     pub cigar_len_stats: FxHashMap<(usize, u8), usize>,
     pub q_score_stats: QualScoreStats,
+
+    // for profiling k-mer match rate in mapped reads
+    pub consecutive_match_stats: FxHashMap<usize, usize>,
+    pub num_aligned_bases: usize,
 }
 
 /// Stats on the number of matches and mismatches for each quality score.
@@ -345,7 +349,13 @@ impl<'a> AlnStats<'a> {
             feature_stats: FxHashMap::default(),
             cigar_len_stats: FxHashMap::default(),
             q_score_stats: QualScoreStats::default(),
+
+            // for profiling k-mer match rate in mapped reads
+            consecutive_match_stats: FxHashMap::default(),
+            num_aligned_bases: 0,
         };
+
+        let mut consecutive_matches: FxHashMap<usize, usize> = FxHashMap::default();
 
         let mut interval_has_error = vec![false; intervals.len()];
         for i in intervals {
@@ -365,6 +375,9 @@ impl<'a> AlnStats<'a> {
             v.iter()
                 .for_each(|&interval_idx| interval_has_error[interval_idx] = true);
         };
+
+        // consecutive match stats
+        let mut current_consec_match: usize = 0;
 
         // count mismatches, indels, and homopolymers
         let cigar = sam::record::Cigar::try_from(r.cigar()).unwrap();
@@ -407,6 +420,10 @@ impl<'a> AlnStats<'a> {
                                 stats.total_qual_error += qual_error;
                                 stats.q_score_stats.increment(q_score as usize, true);
                             });
+
+                            // record consecutive match stats
+                            current_consec_match += 1;
+                            //println!("Current consecutive match: {}", current_consec_match);
                         } else {
                             res.mismatches += 1;
                             res.q_score_stats.increment(q_score as usize, false);
@@ -417,6 +434,13 @@ impl<'a> AlnStats<'a> {
                                 stats.q_score_stats.increment(q_score as usize, false);
                             });
                             intervals_have_error(&curr_interval_idxs);
+
+                            // record consecutive match stats
+                            if current_consec_match > 0 {
+                                *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+                                current_consec_match = 0;
+                                //println!("Mismatch!, recorded consecutive match: {:?}", consecutive_matches);
+                            }
                         }
                         if c == b'C' || c == b'G' {
                             res.gc_content += 1.0;
@@ -456,6 +480,12 @@ impl<'a> AlnStats<'a> {
                         }
                         intervals_have_error(&curr_interval_idxs);
                         query_pos += op.len();
+                        
+                        // record consecutive match stats
+                        if current_consec_match > 0 {
+                            *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+                            current_consec_match = 0;
+                        }
                         break;
                     }
                     Kind::Deletion => {
@@ -486,24 +516,50 @@ impl<'a> AlnStats<'a> {
                         }
                         intervals_have_error(&curr_interval_idxs);
                         ref_pos += 1;
+
+                        // record consecutive match stats
+                        if current_consec_match > 0 {
+                            *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+                            current_consec_match = 0;
+                        }
                     }
                     Kind::SoftClip => {
                         // does not require looping through the number of soft clips
                         query_pos += op.len();
+                        // record consecutive match stats
+                        if current_consec_match > 0 {
+                            *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+                            current_consec_match = 0;
+                        }
                         break;
                     }
                     Kind::HardClip => {
+                        // record consecutive match stats
+                        if current_consec_match > 0 {
+                            *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+                            current_consec_match = 0;
+                        }
                         // does not require looping through the number of hard clips
                         break;
                     }
                     Kind::Skip => {
+                        // record consecutive match stats
+                        if current_consec_match > 0 {
+                            *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+                            current_consec_match = 0;
+                        }
                         // does not require looping through the number of skip operations
                         ref_pos += op.len();
                         break;
                     }
                     _ => panic!("Unexpected CIGAR operation: {}", op),
                 }
+
+                res.num_aligned_bases += 1;
             }
+
+            
+            
 
             // gap compressed
             match op.kind() {
@@ -526,7 +582,20 @@ impl<'a> AlnStats<'a> {
                 }
                 _ => (),
             }
+
+            
         }
+
+        // record consecutive match stats
+        if current_consec_match > 0 {
+            *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
+            current_consec_match = 0;
+        }
+
+        res.consecutive_match_stats = consecutive_matches;
+
+        //println!("Final consecutive match: {:?}", res.consecutive_match_stats);
+        //println!("Final cigar len stats: {:?}", res.cigar_len_stats);
 
         let errors = res.mismatches + res.non_hp_ins + res.non_hp_del + res.hp_ins + res.hp_del;
         res.read_len = res.matches + res.mismatches + res.non_hp_del + res.hp_del;

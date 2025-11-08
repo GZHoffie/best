@@ -97,6 +97,8 @@ pub struct IdentitySummary {
     gc_ins: usize,
     gc_del: usize,
     num_reads: usize,
+
+    num_aligned_bases: usize,
 }
 
 impl IdentitySummary {
@@ -124,12 +126,14 @@ impl IdentitySummary {
         self.gc_ins += aln_stats.gc_ins;
         self.gc_del += aln_stats.gc_del;
         self.num_reads += 1;
+
+        self.num_aligned_bases += aln_stats.num_aligned_bases;
     }
 }
 
 impl fmt::Display for IdentitySummary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{}total_alns,primary_alns,identity,identity_qv,gap_compressed_identity,matches_per_kbp,mismatches_per_kbp,non_hp_ins_per_kbp,non_hp_del_per_kbp,hp_ins_per_kbp,hp_del_per_kbp", if self.name_column.is_some() { "name," } else { "" })?;
+        writeln!(f, "{}total_alns,primary_alns,num_aligned_bases,identity,identity_qv,gap_compressed_identity,matches_per_kbp,mismatches_per_kbp,non_hp_ins_per_kbp,non_hp_del_per_kbp,hp_ins_per_kbp,hp_del_per_kbp", if self.name_column.is_some() { "name," } else { "" })?;
         let num_errors =
             self.mismatches + self.non_hp_ins + self.hp_ins + self.non_hp_del + self.hp_del;
         let num_bases = self.matches + self.mismatches + self.non_hp_del + self.hp_del;
@@ -139,10 +143,11 @@ impl fmt::Display for IdentitySummary {
         let per_kbp = |x| (x as f64) / (num_bases as f64) * 1000.0f64;
         writeln!(
             f,
-            "{}{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            "{}{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
             self.name_column.as_ref().map(|n| n.as_str()).unwrap_or(""),
             self.total_alns,
             self.num_reads,
+            self.num_aligned_bases,
             id,
             concordance_qv(id, num_errors > 0),
             gc_id,
@@ -271,6 +276,53 @@ impl fmt::Display for CigarLenSummary {
                 cigar.0,
                 count,
                 (count as f64) / (total_cigars[cigar.1 as usize] as f64),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+pub struct ConsecutiveMatchSummary {
+    name_column: Option<String>,
+    consecutive_match_stats: FxHashMap<usize, usize>,
+}
+
+impl ConsecutiveMatchSummary {
+    pub fn new(mut name_column: Option<String>) -> Self {
+        if let Some(ref mut name) = name_column {
+            name.push(',');
+        }
+        Self {
+            name_column,
+            consecutive_match_stats: FxHashMap::default(),
+        }
+    }
+
+    pub fn update(&mut self, aln_stats: &AlnStats) {
+        if aln_stats.supplementary {
+            return;
+        }
+
+        for (&k, &v) in &aln_stats.consecutive_match_stats {
+            *self.consecutive_match_stats.entry(k).or_insert(0) += v;
+        }
+    }
+}
+
+impl fmt::Display for ConsecutiveMatchSummary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            f,
+            "consecutive_match_length,count",
+        )?;
+        let mut v = self.consecutive_match_stats.iter().collect::<Vec<_>>();
+        v.sort_by_key(|x| x.0);
+        for (length, &count) in v.into_iter() {
+            writeln!(
+                f,
+                "{},{}",
+                length,
+                count
             )?;
         }
         Ok(())
