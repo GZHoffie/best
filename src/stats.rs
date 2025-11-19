@@ -66,6 +66,7 @@ pub struct AlnStats<'a> {
 
     // for profiling k-mer match rate in mapped reads
     pub consecutive_match_stats: FxHashMap<usize, usize>,
+    pub consecutive_error_stats: FxHashMap<usize, usize>,
     pub num_aligned_bases: usize,
 }
 
@@ -352,10 +353,12 @@ impl<'a> AlnStats<'a> {
 
             // for profiling k-mer match rate in mapped reads
             consecutive_match_stats: FxHashMap::default(),
+            consecutive_error_stats: FxHashMap::default(),
             num_aligned_bases: 0,
         };
 
         let mut consecutive_matches: FxHashMap<usize, usize> = FxHashMap::default();
+        let mut consecutive_errors: FxHashMap<usize, usize> = FxHashMap::default();
 
         let mut interval_has_error = vec![false; intervals.len()];
         for i in intervals {
@@ -378,11 +381,15 @@ impl<'a> AlnStats<'a> {
 
         // consecutive match stats
         let mut current_consec_match: usize = 0;
+        let mut current_consec_error: usize = 0;
 
         // count mismatches, indels, and homopolymers
         let cigar = sam::record::Cigar::try_from(r.cigar()).unwrap();
+
         for op in cigar.iter() {
             for _i in 0..op.len() {
+                //res.num_aligned_bases += 1;
+
                 // skip intervals that cannot overlap the current reference position
                 while interval_start_idx < intervals.len()
                     && ref_pos >= intervals[interval_start_idx].stop
@@ -423,6 +430,12 @@ impl<'a> AlnStats<'a> {
 
                             // record consecutive match stats
                             current_consec_match += 1;
+                            res.num_aligned_bases += 1;
+                            if current_consec_error > 0 {
+                                *consecutive_errors.entry(current_consec_error).or_insert(0) += 1;
+                                current_consec_error = 0;
+                            }
+                            
                             //println!("Current consecutive match: {}", current_consec_match);
                         } else {
                             res.mismatches += 1;
@@ -436,11 +449,13 @@ impl<'a> AlnStats<'a> {
                             intervals_have_error(&curr_interval_idxs);
 
                             // record consecutive match stats
+                            res.num_aligned_bases += 1;
                             if current_consec_match > 0 {
                                 *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                                 current_consec_match = 0;
                                 //println!("Mismatch!, recorded consecutive match: {:?}", consecutive_matches);
                             }
+                            current_consec_error += 1;
                         }
                         if c == b'C' || c == b'G' {
                             res.gc_content += 1.0;
@@ -482,10 +497,12 @@ impl<'a> AlnStats<'a> {
                         query_pos += op.len();
                         
                         // record consecutive match stats
+                        res.num_aligned_bases += 1;
                         if current_consec_match > 0 {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                             current_consec_match = 0;
                         }
+                        current_consec_error += 1;
                         break;
                     }
                     Kind::Deletion => {
@@ -522,6 +539,7 @@ impl<'a> AlnStats<'a> {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                             current_consec_match = 0;
                         }
+                        current_consec_error += 1;
                     }
                     Kind::SoftClip => {
                         // does not require looping through the number of soft clips
@@ -554,8 +572,6 @@ impl<'a> AlnStats<'a> {
                     }
                     _ => panic!("Unexpected CIGAR operation: {}", op),
                 }
-
-                res.num_aligned_bases += 1;
             }
 
             
@@ -591,8 +607,14 @@ impl<'a> AlnStats<'a> {
             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
             current_consec_match = 0;
         }
+        if current_consec_error > 0 {
+            *consecutive_errors.entry(current_consec_error).or_insert(0) += 1;
+            current_consec_error = 0;
+        }
 
         res.consecutive_match_stats = consecutive_matches;
+        res.consecutive_error_stats = consecutive_errors;
+        
 
         //println!("Final consecutive match: {:?}", res.consecutive_match_stats);
         //println!("Final cigar len stats: {:?}", res.cigar_len_stats);

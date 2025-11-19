@@ -329,6 +329,53 @@ impl fmt::Display for ConsecutiveMatchSummary {
     }
 }
 
+pub struct ConsecutiveErrorSummary {
+    name_column: Option<String>,
+    consecutive_error_stats: FxHashMap<usize, usize>,
+}
+
+impl ConsecutiveErrorSummary {
+    pub fn new(mut name_column: Option<String>) -> Self {
+        if let Some(ref mut name) = name_column {
+            name.push(',');
+        }
+        Self {
+            name_column,
+            consecutive_error_stats: FxHashMap::default(),
+        }
+    }
+
+    pub fn update(&mut self, aln_stats: &AlnStats) {
+        if aln_stats.supplementary {
+            return;
+        }
+
+        for (&k, &v) in &aln_stats.consecutive_error_stats {
+            *self.consecutive_error_stats.entry(k).or_insert(0) += v;
+        }
+    }
+}
+
+impl fmt::Display for ConsecutiveErrorSummary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            f,
+            "consecutive_error_length,count",
+        )?;
+        let mut v = self.consecutive_error_stats.iter().collect::<Vec<_>>();
+        v.sort_by_key(|x| x.0);
+        for (length, &count) in v.into_iter() {
+            writeln!(
+                f,
+                "{},{}",
+                length,
+                count
+            )?;
+        }
+        Ok(())
+    }
+}
+
 pub struct BinSummary {
     name_column: Option<String>,
     bin_maps: Vec<(BinType, FxHashMap<String, BinStats>)>,
