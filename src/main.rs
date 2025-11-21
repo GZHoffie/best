@@ -51,6 +51,7 @@ const FEATURE_STATS_NAME: &str = "summary_feature_stats.csv";
 const CIGAR_STATS_NAME: &str = "summary_cigar_stats.csv";
 const CONSECUTIVE_MATCH_STATS_NAME: &str = "summary_consecutive_match_stats.csv";
 const CONSECUTIVE_ERROR_STATS_NAME: &str = "summary_consecutive_error_stats.csv";
+const SEQUENCE_LENGTH_STATS_NAME: &str = "summary_sequence_length_stats.csv";
 const BIN_STATS_NAME: &str = "summary_bin_stats.csv";
 const QUAL_SCORE_STATS_NAME: &str = "summary_qual_score_stats.csv";
 
@@ -113,6 +114,7 @@ fn run(
     let summary_cigars = Mutex::new(CigarLenSummary::new(name_column.clone()));
     let summary_consecutive_matches = Mutex::new(ConsecutiveMatchSummary::new(name_column.clone()));
     let summary_consecutive_errors = Mutex::new(ConsecutiveErrorSummary::new(name_column.clone()));
+    let summary_sequence_length = Mutex::new(SequenceLengthSummary::new(name_column.clone()));
     let summary_bins = bin_types.map(|b| Mutex::new(BinSummary::new(name_column.clone(), b)));
     let summary_qual_score = Mutex::new(QualScoreSummary::new(name_column.clone()));
     let total_alns = AtomicUsize::new(0);
@@ -191,6 +193,7 @@ fn run(
             summary_cigars.lock().unwrap().update(&stats);
             summary_consecutive_matches.lock().unwrap().update(&stats);
             summary_consecutive_errors.lock().unwrap().update(&stats);
+            summary_sequence_length.lock().unwrap().update(&stats);
             summary_bins
                 .as_ref()
                 .map(|b| b.lock().unwrap().update(&stats));
@@ -239,6 +242,12 @@ fn run(
         summary_consecutive_errors.into_inner().unwrap(),
         &stats_prefix,
         CONSECUTIVE_ERROR_STATS_NAME,
+    );
+
+    write_summary(
+        summary_sequence_length.into_inner().unwrap(),
+        &stats_prefix,
+        SEQUENCE_LENGTH_STATS_NAME,
     );
 
     if let Some(b) = summary_bins {

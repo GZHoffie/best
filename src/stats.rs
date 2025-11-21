@@ -67,6 +67,7 @@ pub struct AlnStats<'a> {
     // for profiling k-mer match rate in mapped reads
     pub consecutive_match_stats: FxHashMap<usize, usize>,
     pub consecutive_error_stats: FxHashMap<usize, usize>,
+    pub sequence_length_stats: FxHashMap<usize, usize>,
     pub num_aligned_bases: usize,
 }
 
@@ -354,6 +355,7 @@ impl<'a> AlnStats<'a> {
             // for profiling k-mer match rate in mapped reads
             consecutive_match_stats: FxHashMap::default(),
             consecutive_error_stats: FxHashMap::default(),
+            sequence_length_stats: FxHashMap::default(),
             num_aligned_bases: 0,
         };
 
@@ -382,6 +384,7 @@ impl<'a> AlnStats<'a> {
         // consecutive match stats
         let mut current_consec_match: usize = 0;
         let mut current_consec_error: usize = 0;
+        let mut current_sequence_length: usize = 0;
 
         // count mismatches, indels, and homopolymers
         let cigar = sam::record::Cigar::try_from(r.cigar()).unwrap();
@@ -430,6 +433,7 @@ impl<'a> AlnStats<'a> {
 
                             // record consecutive match stats
                             current_consec_match += 1;
+                            current_sequence_length += 1;
                             res.num_aligned_bases += 1;
                             if current_consec_error > 0 {
                                 *consecutive_errors.entry(current_consec_error).or_insert(0) += 1;
@@ -450,6 +454,7 @@ impl<'a> AlnStats<'a> {
 
                             // record consecutive match stats
                             res.num_aligned_bases += 1;
+                            current_sequence_length += 1;
                             if current_consec_match > 0 {
                                 *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                                 current_consec_match = 0;
@@ -498,6 +503,7 @@ impl<'a> AlnStats<'a> {
                         
                         // record consecutive match stats
                         res.num_aligned_bases += 1;
+                        current_sequence_length += 1;
                         if current_consec_match > 0 {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                             current_consec_match = 0;
@@ -549,6 +555,10 @@ impl<'a> AlnStats<'a> {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                             current_consec_match = 0;
                         }
+                        if current_sequence_length > 0 {
+                            *res.sequence_length_stats.entry(current_sequence_length).or_insert(0) += 1;
+                            current_sequence_length = 0;
+                        }
                         break;
                     }
                     Kind::HardClip => {
@@ -556,6 +566,10 @@ impl<'a> AlnStats<'a> {
                         if current_consec_match > 0 {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                             current_consec_match = 0;
+                        }
+                        if current_sequence_length > 0 {
+                            *res.sequence_length_stats.entry(current_sequence_length).or_insert(0) += 1;
+                            current_sequence_length = 0;
                         }
                         // does not require looping through the number of hard clips
                         break;
@@ -565,6 +579,10 @@ impl<'a> AlnStats<'a> {
                         if current_consec_match > 0 {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
                             current_consec_match = 0;
+                        }
+                        if current_sequence_length > 0 {
+                            *res.sequence_length_stats.entry(current_sequence_length).or_insert(0) += 1;
+                            current_sequence_length = 0;
                         }
                         // does not require looping through the number of skip operations
                         ref_pos += op.len();
