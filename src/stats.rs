@@ -361,6 +361,7 @@ impl<'a> AlnStats<'a> {
 
         let mut consecutive_matches: FxHashMap<usize, usize> = FxHashMap::default();
         let mut consecutive_errors: FxHashMap<usize, usize> = FxHashMap::default();
+        let mut sequence_lengths: FxHashMap<usize, usize> = FxHashMap::default();
 
         let mut interval_has_error = vec![false; intervals.len()];
         for i in intervals {
@@ -556,7 +557,7 @@ impl<'a> AlnStats<'a> {
                             current_consec_match = 0;
                         }
                         if current_sequence_length > 0 {
-                            *res.sequence_length_stats.entry(current_sequence_length).or_insert(0) += 1;
+                            *sequence_lengths.entry(current_sequence_length).or_insert(0) += 1;
                             current_sequence_length = 0;
                         }
                         break;
@@ -568,7 +569,7 @@ impl<'a> AlnStats<'a> {
                             current_consec_match = 0;
                         }
                         if current_sequence_length > 0 {
-                            *res.sequence_length_stats.entry(current_sequence_length).or_insert(0) += 1;
+                            *sequence_lengths.entry(current_sequence_length).or_insert(0) += 1;
                             current_sequence_length = 0;
                         }
                         // does not require looping through the number of hard clips
@@ -581,7 +582,7 @@ impl<'a> AlnStats<'a> {
                             current_consec_match = 0;
                         }
                         if current_sequence_length > 0 {
-                            *res.sequence_length_stats.entry(current_sequence_length).or_insert(0) += 1;
+                            *sequence_lengths.entry(current_sequence_length).or_insert(0) += 1;
                             current_sequence_length = 0;
                         }
                         // does not require looping through the number of skip operations
@@ -629,9 +630,14 @@ impl<'a> AlnStats<'a> {
             *consecutive_errors.entry(current_consec_error).or_insert(0) += 1;
             current_consec_error = 0;
         }
+        if current_sequence_length > 0 {
+            *sequence_lengths.entry(current_sequence_length).or_insert(0) += 1;
+            current_sequence_length = 0;
+        }
 
         res.consecutive_match_stats = consecutive_matches;
         res.consecutive_error_stats = consecutive_errors;
+        res.sequence_length_stats = sequence_lengths;
         
 
         //println!("Final consecutive match: {:?}", res.consecutive_match_stats);
