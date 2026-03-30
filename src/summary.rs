@@ -528,29 +528,29 @@ impl fmt::Display for ReadPositionSummary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{}read_position,matches,mismatches,insertions,deletions",
+            "{}read_position,from_start,matches,mismatches,insertions,deletions",
             if self.name_column.is_some() {
                 "name,"
             } else {
                 ""
             }
         )?;
+        let name = self.name_column.as_ref().map(|n| n.as_str()).unwrap_or("");
         for (pos, &(matches, mismatches, insertions, deletions)) in
-            self.stats.stats.iter().enumerate().skip(1)
+            self.stats.from_start.iter().enumerate().skip(1)
         {
             if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 {
                 continue;
             }
-            writeln!(
-                f,
-                "{}{},{},{},{},{}",
-                self.name_column.as_ref().map(|n| n.as_str()).unwrap_or(""),
-                pos,
-                matches,
-                mismatches,
-                insertions,
-                deletions
-            )?;
+            writeln!(f, "{}{},true,{},{},{},{}", name, pos, matches, mismatches, insertions, deletions)?;
+        }
+        for (pos, &(matches, mismatches, insertions, deletions)) in
+            self.stats.from_end.iter().enumerate().skip(1)
+        {
+            if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 {
+                continue;
+            }
+            writeln!(f, "{}{},false,{},{},{},{}", name, pos, matches, mismatches, insertions, deletions)?;
         }
         Ok(())
     }

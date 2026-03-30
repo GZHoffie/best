@@ -147,49 +147,60 @@ impl Default for QualScoreStats {
     }
 }
 
-/// Stats on the number of matches, mismatches, insertions, and deletions at each read position.
+/// Stats on the number of matches, mismatches, insertions, and deletions at each read position,
+/// counted from both the start and the end of the read.
 #[derive(Debug, Clone, Default)]
 pub struct ReadPositionStats {
-    pub stats: Vec<(usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion)
+    pub from_start: Vec<(usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion)
+    pub from_end: Vec<(usize, usize, usize, usize)>,
+}
+
+fn ensure_pos_len(v: &mut Vec<(usize, usize, usize, usize)>, pos: usize) {
+    if v.len() <= pos {
+        v.resize(pos + 1, (0, 0, 0, 0));
+    }
 }
 
 impl ReadPositionStats {
-    fn ensure_len(&mut self, pos: usize) {
-        if self.stats.len() <= pos {
-            self.stats.resize(pos + 1, (0, 0, 0, 0));
-        }
+    pub fn increment_match(&mut self, start_pos: usize, end_pos: usize) {
+        ensure_pos_len(&mut self.from_start, start_pos);
+        self.from_start[start_pos].0 += 1;
+        ensure_pos_len(&mut self.from_end, end_pos);
+        self.from_end[end_pos].0 += 1;
     }
 
-    pub fn increment_match(&mut self, pos: usize) {
-        self.ensure_len(pos);
-        self.stats[pos].0 += 1;
+    pub fn increment_mismatch(&mut self, start_pos: usize, end_pos: usize) {
+        ensure_pos_len(&mut self.from_start, start_pos);
+        self.from_start[start_pos].1 += 1;
+        ensure_pos_len(&mut self.from_end, end_pos);
+        self.from_end[end_pos].1 += 1;
     }
 
-    pub fn increment_mismatch(&mut self, pos: usize) {
-        self.ensure_len(pos);
-        self.stats[pos].1 += 1;
+    pub fn increment_ins(&mut self, start_pos: usize, end_pos: usize) {
+        ensure_pos_len(&mut self.from_start, start_pos);
+        self.from_start[start_pos].2 += 1;
+        ensure_pos_len(&mut self.from_end, end_pos);
+        self.from_end[end_pos].2 += 1;
     }
 
-    pub fn increment_ins(&mut self, pos: usize) {
-        self.ensure_len(pos);
-        self.stats[pos].2 += 1;
-    }
-
-    pub fn increment_del(&mut self, pos: usize) {
-        self.ensure_len(pos);
-        self.stats[pos].3 += 1;
+    pub fn increment_del(&mut self, start_pos: usize, end_pos: usize) {
+        ensure_pos_len(&mut self.from_start, start_pos);
+        self.from_start[start_pos].3 += 1;
+        ensure_pos_len(&mut self.from_end, end_pos);
+        self.from_end[end_pos].3 += 1;
     }
 
     pub fn assign_add(&mut self, o: &Self) {
-        if o.stats.len() > self.stats.len() {
-            self.stats.resize(o.stats.len(), (0, 0, 0, 0));
+        fn add_vecs(dst: &mut Vec<(usize, usize, usize, usize)>, src: &[(usize, usize, usize, usize)]) {
+            if src.len() > dst.len() {
+                dst.resize(src.len(), (0, 0, 0, 0));
+            }
+            dst.iter_mut().zip(src).for_each(|(a, b)| {
+                a.0 += b.0; a.1 += b.1; a.2 += b.2; a.3 += b.3;
+            });
         }
-        self.stats.iter_mut().zip(&o.stats).for_each(|(a, b)| {
-            a.0 += b.0;
-            a.1 += b.1;
-            a.2 += b.2;
-            a.3 += b.3;
-        });
+        add_vecs(&mut self.from_start, &o.from_start);
+        add_vecs(&mut self.from_end, &o.from_end);
     }
 }
 
@@ -497,7 +508,7 @@ impl<'a> AlnStats<'a> {
                         if is_match {
                             res.matches += 1;
                             res.q_score_stats.increment(q_score as usize, true);
-                            res.read_pos_stats.increment_match(query_pos);
+                            res.read_pos_stats.increment_match(query_pos, sequence.len() - query_pos + 1);
                             curr_features.iter().for_each(|f| {
                                 let stats = res.feature_stats.get_mut(f).unwrap();
                                 stats.matches += 1;
@@ -518,7 +529,7 @@ impl<'a> AlnStats<'a> {
                         } else {
                             res.mismatches += 1;
                             res.q_score_stats.increment(q_score as usize, false);
-                            res.read_pos_stats.increment_mismatch(query_pos);
+                            res.read_pos_stats.increment_mismatch(query_pos, sequence.len() - query_pos + 1);
                             curr_features.iter().for_each(|f| {
                                 let stats = res.feature_stats.get_mut(f).unwrap();
                                 stats.mismatches += 1;
@@ -576,7 +587,7 @@ impl<'a> AlnStats<'a> {
                         for _ in 0..op.len() {
                             let ins_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
                             res.q_score_stats.increment_ins(ins_q_score);
-                            res.read_pos_stats.increment_ins(query_pos);
+                            res.read_pos_stats.increment_ins(query_pos, sequence.len() - query_pos + 1);
                             curr_features.iter().for_each(|f| {
                                 res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_ins(ins_q_score);
                             });
@@ -622,7 +633,7 @@ impl<'a> AlnStats<'a> {
                         }
                         let del_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
                         res.q_score_stats.increment_del(del_q_score);
-                        res.read_pos_stats.increment_del(query_pos);
+                        res.read_pos_stats.increment_del(query_pos, sequence.len() - query_pos + 1);
                         curr_features.iter().for_each(|f| {
                             res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_del(del_q_score);
                         });
