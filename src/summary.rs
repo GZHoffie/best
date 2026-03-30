@@ -500,6 +500,62 @@ impl fmt::Display for BinSummary {
     }
 }
 
+pub struct ReadPositionSummary {
+    name_column: Option<String>,
+    stats: ReadPositionStats,
+}
+
+impl ReadPositionSummary {
+    pub fn new(mut name_column: Option<String>) -> Self {
+        if let Some(ref mut name) = name_column {
+            name.push(',');
+        }
+        Self {
+            name_column,
+            stats: ReadPositionStats::default(),
+        }
+    }
+
+    pub fn update(&mut self, aln_stats: &AlnStats) {
+        if aln_stats.supplementary {
+            return;
+        }
+        self.stats.assign_add(&aln_stats.read_pos_stats);
+    }
+}
+
+impl fmt::Display for ReadPositionSummary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            f,
+            "{}read_position,matches,mismatches,insertions,deletions",
+            if self.name_column.is_some() {
+                "name,"
+            } else {
+                ""
+            }
+        )?;
+        for (pos, &(matches, mismatches, insertions, deletions)) in
+            self.stats.stats.iter().enumerate().skip(1)
+        {
+            if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 {
+                continue;
+            }
+            writeln!(
+                f,
+                "{}{},{},{},{},{}",
+                self.name_column.as_ref().map(|n| n.as_str()).unwrap_or(""),
+                pos,
+                matches,
+                mismatches,
+                insertions,
+                deletions
+            )?;
+        }
+        Ok(())
+    }
+}
+
 pub struct QualScoreSummary {
     name_column: Option<String>,
     feature_qual: FxHashMap<String, QualScoreStats>,
@@ -541,7 +597,7 @@ impl fmt::Display for QualScoreSummary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{}feature,qual_score,empirical_qv",
+            "{}feature,qual_score,matches,mismatches,insertions,deletions,empirical_qv",
             if self.name_column.is_some() {
                 "name,"
             } else {
@@ -551,13 +607,21 @@ impl fmt::Display for QualScoreSummary {
         let mut v = self.feature_qual.iter().collect::<Vec<_>>();
         v.sort_by_key(|x| x.0);
         for (feature, stats) in v.into_iter() {
-            for (i, qv) in stats.empirical_qv().into_iter() {
+            for (i, matches, mismatches, insertions, deletions) in stats.all_stats().into_iter() {
+                let qv = concordance_qv(
+                    (matches as f64) / ((matches + mismatches) as f64),
+                    mismatches != 0,
+                );
                 writeln!(
                     f,
-                    "{}{},{},{:.2}",
+                    "{}{},{},{},{},{},{},{:.2}",
                     self.name_column.as_ref().map(|n| n.as_str()).unwrap_or(""),
                     feature.trim(),
                     i,
+                    matches,
+                    mismatches,
+                    insertions,
+                    deletions,
                     qv
                 )?;
             }

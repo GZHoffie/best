@@ -63,6 +63,7 @@ pub struct AlnStats<'a> {
     pub feature_stats: FxHashMap<&'a str, FeatureStats>,
     pub cigar_len_stats: FxHashMap<(usize, u8), usize>,
     pub q_score_stats: QualScoreStats,
+    pub read_pos_stats: ReadPositionStats,
 
     // for profiling k-mer match rate in mapped reads
     pub consecutive_match_stats: FxHashMap<usize, usize>,
@@ -71,10 +72,10 @@ pub struct AlnStats<'a> {
     pub num_aligned_bases: usize,
 }
 
-/// Stats on the number of matches and mismatches for each quality score.
+/// Stats on the number of matches, mismatches, insertions, and deletions for each quality score.
 #[derive(Debug, Clone)]
 pub struct QualScoreStats {
-    stats: Vec<(usize, usize)>, // (match, mismatch)
+    stats: Vec<(usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion)
 }
 
 impl QualScoreStats {
@@ -82,6 +83,8 @@ impl QualScoreStats {
         self.stats.iter_mut().zip(&o.stats).for_each(|(q, o)| {
             q.0 += o.0;
             q.1 += o.1;
+            q.2 += o.2;
+            q.3 += o.3;
         });
     }
 
@@ -93,11 +96,19 @@ impl QualScoreStats {
         }
     }
 
+    pub fn increment_ins(&mut self, q_score: usize) {
+        self.stats[q_score].2 += 1;
+    }
+
+    pub fn increment_del(&mut self, q_score: usize) {
+        self.stats[q_score].3 += 1;
+    }
+
     pub fn empirical_qv(&self) -> Vec<(usize, f64)> {
         self.stats
             .iter()
             .enumerate()
-            .filter_map(|(i, &(matches, mismatches))| {
+            .filter_map(|(i, &(matches, mismatches, _, _))| {
                 if matches == 0 && mismatches == 0 {
                     None
                 } else {
@@ -112,13 +123,73 @@ impl QualScoreStats {
             })
             .collect()
     }
+
+    pub fn all_stats(&self) -> Vec<(usize, usize, usize, usize, usize)> {
+        self.stats
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &(matches, mismatches, insertions, deletions))| {
+                if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 {
+                    None
+                } else {
+                    Some((i, matches, mismatches, insertions, deletions))
+                }
+            })
+            .collect()
+    }
 }
 
 impl Default for QualScoreStats {
     fn default() -> Self {
         Self {
-            stats: vec![(0usize, 0usize); 256],
+            stats: vec![(0usize, 0usize, 0usize, 0usize); 256],
         }
+    }
+}
+
+/// Stats on the number of matches, mismatches, insertions, and deletions at each read position.
+#[derive(Debug, Clone, Default)]
+pub struct ReadPositionStats {
+    pub stats: Vec<(usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion)
+}
+
+impl ReadPositionStats {
+    fn ensure_len(&mut self, pos: usize) {
+        if self.stats.len() <= pos {
+            self.stats.resize(pos + 1, (0, 0, 0, 0));
+        }
+    }
+
+    pub fn increment_match(&mut self, pos: usize) {
+        self.ensure_len(pos);
+        self.stats[pos].0 += 1;
+    }
+
+    pub fn increment_mismatch(&mut self, pos: usize) {
+        self.ensure_len(pos);
+        self.stats[pos].1 += 1;
+    }
+
+    pub fn increment_ins(&mut self, pos: usize) {
+        self.ensure_len(pos);
+        self.stats[pos].2 += 1;
+    }
+
+    pub fn increment_del(&mut self, pos: usize) {
+        self.ensure_len(pos);
+        self.stats[pos].3 += 1;
+    }
+
+    pub fn assign_add(&mut self, o: &Self) {
+        if o.stats.len() > self.stats.len() {
+            self.stats.resize(o.stats.len(), (0, 0, 0, 0));
+        }
+        self.stats.iter_mut().zip(&o.stats).for_each(|(a, b)| {
+            a.0 += b.0;
+            a.1 += b.1;
+            a.2 += b.2;
+            a.3 += b.3;
+        });
     }
 }
 
@@ -351,6 +422,7 @@ impl<'a> AlnStats<'a> {
             feature_stats: FxHashMap::default(),
             cigar_len_stats: FxHashMap::default(),
             q_score_stats: QualScoreStats::default(),
+            read_pos_stats: ReadPositionStats::default(),
 
             // for profiling k-mer match rate in mapped reads
             consecutive_match_stats: FxHashMap::default(),
@@ -425,6 +497,7 @@ impl<'a> AlnStats<'a> {
                         if is_match {
                             res.matches += 1;
                             res.q_score_stats.increment(q_score as usize, true);
+                            res.read_pos_stats.increment_match(query_pos);
                             curr_features.iter().for_each(|f| {
                                 let stats = res.feature_stats.get_mut(f).unwrap();
                                 stats.matches += 1;
@@ -445,6 +518,7 @@ impl<'a> AlnStats<'a> {
                         } else {
                             res.mismatches += 1;
                             res.q_score_stats.increment(q_score as usize, false);
+                            res.read_pos_stats.increment_mismatch(query_pos);
                             curr_features.iter().for_each(|f| {
                                 let stats = res.feature_stats.get_mut(f).unwrap();
                                 stats.mismatches += 1;
@@ -499,9 +573,15 @@ impl<'a> AlnStats<'a> {
                                 res.feature_stats.get_mut(f).unwrap().non_hp_ins += op.len()
                             });
                         }
+                        let ins_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
+                        res.q_score_stats.increment_ins(ins_q_score);
+                        res.read_pos_stats.increment_ins(query_pos);
+                        curr_features.iter().for_each(|f| {
+                            res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_ins(ins_q_score);
+                        });
                         intervals_have_error(&curr_interval_idxs);
                         query_pos += op.len();
-                        
+
                         // record consecutive match stats
                         res.num_aligned_bases += 1;
                         current_sequence_length += 1;
@@ -538,6 +618,11 @@ impl<'a> AlnStats<'a> {
                                 res.feature_stats.get_mut(f).unwrap().non_hp_del += 1
                             });
                         }
+                        res.q_score_stats.increment_del(0);
+                        res.read_pos_stats.increment_del(query_pos);
+                        curr_features.iter().for_each(|f| {
+                            res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_del(0);
+                        });
                         intervals_have_error(&curr_interval_idxs);
                         ref_pos += 1;
 

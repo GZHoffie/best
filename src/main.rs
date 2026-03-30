@@ -54,6 +54,7 @@ const CONSECUTIVE_ERROR_STATS_NAME: &str = "summary_consecutive_error_stats.csv"
 const SEQUENCE_LENGTH_STATS_NAME: &str = "summary_sequence_length_stats.csv";
 const BIN_STATS_NAME: &str = "summary_bin_stats.csv";
 const QUAL_SCORE_STATS_NAME: &str = "summary_qual_score_stats.csv";
+const READ_POSITION_STATS_NAME: &str = "summary_read_position_stats.csv";
 
 fn run(
     input_path: String,
@@ -117,6 +118,7 @@ fn run(
     let summary_sequence_length = Mutex::new(SequenceLengthSummary::new(name_column.clone()));
     let summary_bins = bin_types.map(|b| Mutex::new(BinSummary::new(name_column.clone(), b)));
     let summary_qual_score = Mutex::new(QualScoreSummary::new(name_column.clone()));
+    let summary_read_position = Mutex::new(ReadPositionSummary::new(name_column.clone()));
     let total_alns = AtomicUsize::new(0);
 
     // lazily read records to shift parsing work to individual threads
@@ -198,6 +200,7 @@ fn run(
                 .as_ref()
                 .map(|b| b.lock().unwrap().update(&stats));
             summary_qual_score.lock().unwrap().update(&stats);
+            summary_read_position.lock().unwrap().update(&stats);
 
             if let Some(ref w) = aln_stats_writer {
                 let mut w = w.lock().unwrap();
@@ -258,6 +261,12 @@ fn run(
         summary_qual_score.into_inner().unwrap(),
         &stats_prefix,
         QUAL_SCORE_STATS_NAME,
+    );
+
+    write_summary(
+        summary_read_position.into_inner().unwrap(),
+        &stats_prefix,
+        READ_POSITION_STATS_NAME,
     );
 }
 
