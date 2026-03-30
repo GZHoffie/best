@@ -573,14 +573,16 @@ impl<'a> AlnStats<'a> {
                                 res.feature_stats.get_mut(f).unwrap().non_hp_ins += op.len()
                             });
                         }
-                        let ins_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
-                        res.q_score_stats.increment_ins(ins_q_score);
-                        res.read_pos_stats.increment_ins(query_pos);
-                        curr_features.iter().for_each(|f| {
-                            res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_ins(ins_q_score);
-                        });
+                        for _ in 0..op.len() {
+                            let ins_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
+                            res.q_score_stats.increment_ins(ins_q_score);
+                            res.read_pos_stats.increment_ins(query_pos);
+                            curr_features.iter().for_each(|f| {
+                                res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_ins(ins_q_score);
+                            });
+                            query_pos += 1;
+                        }
                         intervals_have_error(&curr_interval_idxs);
-                        query_pos += op.len();
 
                         // record consecutive match stats
                         res.num_aligned_bases += 1;
@@ -618,10 +620,11 @@ impl<'a> AlnStats<'a> {
                                 res.feature_stats.get_mut(f).unwrap().non_hp_del += 1
                             });
                         }
-                        res.q_score_stats.increment_del(0);
+                        let del_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
+                        res.q_score_stats.increment_del(del_q_score);
                         res.read_pos_stats.increment_del(query_pos);
                         curr_features.iter().for_each(|f| {
-                            res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_del(0);
+                            res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_del(del_q_score);
                         });
                         intervals_have_error(&curr_interval_idxs);
                         ref_pos += 1;
