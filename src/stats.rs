@@ -454,6 +454,7 @@ impl<'a> AlnStats<'a> {
                 .overlaps += 1;
         }
 
+        let strand_rev = res.strand_rev;
         let mut query_pos = 1;
         let mut interval_start_idx = 0;
         let curr_ref_seq = reference_seqs[&res.chr].sequence();
@@ -508,7 +509,8 @@ impl<'a> AlnStats<'a> {
                         if is_match {
                             res.matches += 1;
                             res.q_score_stats.increment(q_score as usize, true);
-                            res.read_pos_stats.increment_match(query_pos, sequence.len() - query_pos + 1);
+                            let (rps, rpe) = if strand_rev { (sequence.len() - query_pos + 1, query_pos) } else { (query_pos, sequence.len() - query_pos + 1) };
+                            res.read_pos_stats.increment_match(rps, rpe);
                             curr_features.iter().for_each(|f| {
                                 let stats = res.feature_stats.get_mut(f).unwrap();
                                 stats.matches += 1;
@@ -529,7 +531,8 @@ impl<'a> AlnStats<'a> {
                         } else {
                             res.mismatches += 1;
                             res.q_score_stats.increment(q_score as usize, false);
-                            res.read_pos_stats.increment_mismatch(query_pos, sequence.len() - query_pos + 1);
+                            let (rps, rpe) = if strand_rev { (sequence.len() - query_pos + 1, query_pos) } else { (query_pos, sequence.len() - query_pos + 1) };
+                            res.read_pos_stats.increment_mismatch(rps, rpe);
                             curr_features.iter().for_each(|f| {
                                 let stats = res.feature_stats.get_mut(f).unwrap();
                                 stats.mismatches += 1;
@@ -587,7 +590,8 @@ impl<'a> AlnStats<'a> {
                         for _ in 0..op.len() {
                             let ins_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
                             res.q_score_stats.increment_ins(ins_q_score);
-                            res.read_pos_stats.increment_ins(query_pos, sequence.len() - query_pos + 1);
+                            let (rps, rpe) = if strand_rev { (sequence.len() - query_pos + 1, query_pos) } else { (query_pos, sequence.len() - query_pos + 1) };
+                            res.read_pos_stats.increment_ins(rps, rpe);
                             curr_features.iter().for_each(|f| {
                                 res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_ins(ins_q_score);
                             });
@@ -633,7 +637,8 @@ impl<'a> AlnStats<'a> {
                         }
                         let del_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
                         res.q_score_stats.increment_del(del_q_score);
-                        res.read_pos_stats.increment_del(query_pos, sequence.len() - query_pos + 1);
+                        let (rps, rpe) = if strand_rev { (sequence.len() - query_pos + 1, query_pos) } else { (query_pos, sequence.len() - query_pos + 1) };
+                        res.read_pos_stats.increment_del(rps, rpe);
                         curr_features.iter().for_each(|f| {
                             res.feature_stats.get_mut(f).unwrap().q_score_stats.increment_del(del_q_score);
                         });
