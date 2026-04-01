@@ -72,10 +72,10 @@ pub struct AlnStats<'a> {
     pub num_aligned_bases: usize,
 }
 
-/// Stats on the number of matches, mismatches, insertions, deletions, and soft-clipped bases for each quality score.
+/// Stats on the number of matches, mismatches, insertions, deletions, soft-clipped, and skipped bases for each quality score.
 #[derive(Debug, Clone)]
 pub struct QualScoreStats {
-    stats: Vec<(usize, usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion, clipped)
+    stats: Vec<(usize, usize, usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion, clipped, skipped)
 }
 
 impl QualScoreStats {
@@ -86,6 +86,7 @@ impl QualScoreStats {
             q.2 += o.2;
             q.3 += o.3;
             q.4 += o.4;
+            q.5 += o.5;
         });
     }
 
@@ -109,11 +110,15 @@ impl QualScoreStats {
         self.stats[q_score].4 += 1;
     }
 
+    pub fn increment_skip(&mut self, q_score: usize) {
+        self.stats[q_score].5 += 1;
+    }
+
     pub fn empirical_qv(&self) -> Vec<(usize, f64)> {
         self.stats
             .iter()
             .enumerate()
-            .filter_map(|(i, &(matches, mismatches, _, _, _))| {
+            .filter_map(|(i, &(matches, mismatches, _, _, _, _))| {
                 if matches == 0 && mismatches == 0 {
                     None
                 } else {
@@ -129,15 +134,15 @@ impl QualScoreStats {
             .collect()
     }
 
-    pub fn all_stats(&self) -> Vec<(usize, usize, usize, usize, usize, usize)> {
+    pub fn all_stats(&self) -> Vec<(usize, usize, usize, usize, usize, usize, usize)> {
         self.stats
             .iter()
             .enumerate()
-            .filter_map(|(i, &(matches, mismatches, insertions, deletions, clipped))| {
-                if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 && clipped == 0 {
+            .filter_map(|(i, &(matches, mismatches, insertions, deletions, clipped, skipped))| {
+                if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 && clipped == 0 && skipped == 0 {
                     None
                 } else {
-                    Some((i, matches, mismatches, insertions, deletions, clipped))
+                    Some((i, matches, mismatches, insertions, deletions, clipped, skipped))
                 }
             })
             .collect()
@@ -147,22 +152,22 @@ impl QualScoreStats {
 impl Default for QualScoreStats {
     fn default() -> Self {
         Self {
-            stats: vec![(0usize, 0usize, 0usize, 0usize, 0usize); 256],
+            stats: vec![(0usize, 0usize, 0usize, 0usize, 0usize, 0usize); 256],
         }
     }
 }
 
-/// Stats on the number of matches, mismatches, insertions, deletions, and soft-clipped bases at each read position,
+/// Stats on the number of matches, mismatches, insertions, deletions, soft-clipped, and skipped bases at each read position,
 /// counted from both the start and the end of the read.
 #[derive(Debug, Clone, Default)]
 pub struct ReadPositionStats {
-    pub from_start: Vec<(usize, usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion, clipped)
-    pub from_end: Vec<(usize, usize, usize, usize, usize)>,
+    pub from_start: Vec<(usize, usize, usize, usize, usize, usize)>, // (match, mismatch, insertion, deletion, clipped, skipped)
+    pub from_end: Vec<(usize, usize, usize, usize, usize, usize)>,
 }
 
-fn ensure_pos_len(v: &mut Vec<(usize, usize, usize, usize, usize)>, pos: usize) {
+fn ensure_pos_len(v: &mut Vec<(usize, usize, usize, usize, usize, usize)>, pos: usize) {
     if v.len() <= pos {
-        v.resize(pos + 1, (0, 0, 0, 0, 0));
+        v.resize(pos + 1, (0, 0, 0, 0, 0, 0));
     }
 }
 
@@ -202,13 +207,20 @@ impl ReadPositionStats {
         self.from_end[end_pos].4 += 1;
     }
 
+    pub fn increment_skip(&mut self, start_pos: usize, end_pos: usize) {
+        ensure_pos_len(&mut self.from_start, start_pos);
+        self.from_start[start_pos].5 += 1;
+        ensure_pos_len(&mut self.from_end, end_pos);
+        self.from_end[end_pos].5 += 1;
+    }
+
     pub fn assign_add(&mut self, o: &Self) {
-        fn add_vecs(dst: &mut Vec<(usize, usize, usize, usize, usize)>, src: &[(usize, usize, usize, usize, usize)]) {
+        fn add_vecs(dst: &mut Vec<(usize, usize, usize, usize, usize, usize)>, src: &[(usize, usize, usize, usize, usize, usize)]) {
             if src.len() > dst.len() {
-                dst.resize(src.len(), (0, 0, 0, 0, 0));
+                dst.resize(src.len(), (0, 0, 0, 0, 0, 0));
             }
             dst.iter_mut().zip(src).for_each(|(a, b)| {
-                a.0 += b.0; a.1 += b.1; a.2 += b.2; a.3 += b.3; a.4 += b.4;
+                a.0 += b.0; a.1 += b.1; a.2 += b.2; a.3 += b.3; a.4 += b.4; a.5 += b.5;
             });
         }
         add_vecs(&mut self.from_start, &o.from_start);
@@ -697,6 +709,10 @@ impl<'a> AlnStats<'a> {
                         break;
                     }
                     Kind::Skip => {
+                        let skip_q_score = u8::from(q_scores[Position::new(query_pos).unwrap()]) as usize;
+                        res.q_score_stats.increment_skip(skip_q_score);
+                        let (rps, rpe) = if strand_rev { (sequence.len() - query_pos + 1, query_pos) } else { (query_pos, sequence.len() - query_pos + 1) };
+                        res.read_pos_stats.increment_skip(rps, rpe);
                         // record consecutive match stats
                         if current_consec_match > 0 {
                             *consecutive_matches.entry(current_consec_match).or_insert(0) += 1;
