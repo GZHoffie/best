@@ -528,7 +528,7 @@ impl fmt::Display for ReadPositionSummary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{}read_position,from_start,matches,mismatches,insertions,deletions",
+            "{}read_position,from_start,matches,mismatches,insertions,deletions,clipped",
             if self.name_column.is_some() {
                 "name,"
             } else {
@@ -536,21 +536,21 @@ impl fmt::Display for ReadPositionSummary {
             }
         )?;
         let name = self.name_column.as_ref().map(|n| n.as_str()).unwrap_or("");
-        for (pos, &(matches, mismatches, insertions, deletions)) in
+        for (pos, &(matches, mismatches, insertions, deletions, clipped)) in
             self.stats.from_start.iter().enumerate().skip(1)
         {
-            if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 {
+            if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 && clipped == 0 {
                 continue;
             }
-            writeln!(f, "{}{},true,{},{},{},{}", name, pos, matches, mismatches, insertions, deletions)?;
+            writeln!(f, "{}{},true,{},{},{},{},{}", name, pos, matches, mismatches, insertions, deletions, clipped)?;
         }
-        for (pos, &(matches, mismatches, insertions, deletions)) in
+        for (pos, &(matches, mismatches, insertions, deletions, clipped)) in
             self.stats.from_end.iter().enumerate().skip(1)
         {
-            if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 {
+            if matches == 0 && mismatches == 0 && insertions == 0 && deletions == 0 && clipped == 0 {
                 continue;
             }
-            writeln!(f, "{}{},false,{},{},{},{}", name, pos, matches, mismatches, insertions, deletions)?;
+            writeln!(f, "{}{},false,{},{},{},{},{}", name, pos, matches, mismatches, insertions, deletions, clipped)?;
         }
         Ok(())
     }
@@ -597,7 +597,7 @@ impl fmt::Display for QualScoreSummary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{}feature,qual_score,matches,mismatches,insertions,deletions,empirical_qv",
+            "{}feature,qual_score,matches,mismatches,insertions,deletions,clipped,empirical_qv",
             if self.name_column.is_some() {
                 "name,"
             } else {
@@ -607,14 +607,14 @@ impl fmt::Display for QualScoreSummary {
         let mut v = self.feature_qual.iter().collect::<Vec<_>>();
         v.sort_by_key(|x| x.0);
         for (feature, stats) in v.into_iter() {
-            for (i, matches, mismatches, insertions, deletions) in stats.all_stats().into_iter() {
+            for (i, matches, mismatches, insertions, deletions, clipped) in stats.all_stats().into_iter() {
                 let qv = concordance_qv(
                     (matches as f64) / ((matches + mismatches) as f64),
                     mismatches != 0,
                 );
                 writeln!(
                     f,
-                    "{}{},{},{},{},{},{},{:.2}",
+                    "{}{},{},{},{},{},{},{},{:.2}",
                     self.name_column.as_ref().map(|n| n.as_str()).unwrap_or(""),
                     feature.trim(),
                     i,
@@ -622,6 +622,7 @@ impl fmt::Display for QualScoreSummary {
                     mismatches,
                     insertions,
                     deletions,
+                    clipped,
                     qv
                 )?;
             }
