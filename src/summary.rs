@@ -27,6 +27,102 @@ use crate::stats::*;
 
 // important to ensure that summary stats are sorted so output order is deterministic
 
+#[derive(Debug, Default)]
+pub struct SBSSummary {
+    counts: [[usize; 4]; 4],
+}
+
+impl SBSSummary {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Records a substitution from the reference base to the read base.
+    pub fn update(&mut self, reference: u8, substitution: u8) {
+        if let (Some(reference), Some(substitution)) =
+            (base_index(reference), base_index(substitution))
+        {
+            if reference != substitution {
+                self.counts[reference][substitution] += 1;
+            }
+        }
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        for reference in 0..self.counts.len() {
+            for substitution in 0..self.counts[reference].len() {
+                self.counts[reference][substitution] += other.counts[reference][substitution];
+            }
+        }
+    }
+}
+
+fn base_index(base: u8) -> Option<usize> {
+    match base.to_ascii_uppercase() {
+        b'A' => Some(0),
+        b'C' => Some(1),
+        b'G' => Some(2),
+        b'T' => Some(3),
+        _ => None,
+    }
+}
+
+impl fmt::Display for SBSSummary {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "substitution_type,count,frequency")?;
+        let total: usize = self.counts.iter().flatten().sum();
+        let bases = [b'A', b'C', b'G', b'T'];
+
+        for (reference, &reference_base) in bases.iter().enumerate() {
+            for (substitution, &substitution_base) in bases.iter().enumerate() {
+                if reference == substitution {
+                    continue;
+                }
+                let count = self.counts[reference][substitution];
+                let frequency = if total == 0 {
+                    0.0
+                } else {
+                    count as f64 / total as f64
+                };
+                writeln!(
+                    f,
+                    "{}>{},{},{:.6}",
+                    reference_base as char, substitution_base as char, count, frequency
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SBSSummary;
+
+    #[test]
+    fn sbs_summary_counts_and_normalizes_substitutions() {
+        let mut summary = SBSSummary::new();
+        summary.update(b'A', b'C');
+        summary.update(b'a', b'c');
+        summary.update(b'C', b'T');
+        summary.update(b'G', b'G');
+        summary.update(b'N', b'A');
+
+        let csv = summary.to_string();
+        let rows: Vec<&str> = csv.lines().collect();
+        assert_eq!(rows[0], "substitution_type,count,frequency");
+        assert_eq!(rows.len(), 13);
+        assert!(rows.contains(&"A>C,2,0.666667"));
+        assert!(rows.contains(&"C>T,1,0.333333"));
+
+        let frequency_sum: f64 = rows[1..]
+            .iter()
+            .map(|row| row.rsplit(',').next().unwrap().parse::<f64>().unwrap())
+            .sum();
+        assert!((frequency_sum - 1.0).abs() < 1e-6);
+    }
+}
+
 pub struct YieldSummary {
     name_column: Option<String>,
     /// (reads, bases)

@@ -31,6 +31,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::bed::*;
+use crate::summary::SBSSummary;
 
 /// Statistics for each alignment.
 #[derive(Debug)]
@@ -64,6 +65,7 @@ pub struct AlnStats<'a> {
     pub cigar_len_stats: FxHashMap<(usize, u8), usize>,
     pub q_score_stats: QualScoreStats,
     pub read_pos_stats: ReadPositionStats,
+    pub sbs_summary: SBSSummary,
 
     // for profiling k-mer match rate in mapped reads
     pub consecutive_match_stats: FxHashMap<usize, usize>,
@@ -458,6 +460,7 @@ impl<'a> AlnStats<'a> {
             cigar_len_stats: FxHashMap::default(),
             q_score_stats: QualScoreStats::default(),
             read_pos_stats: ReadPositionStats::default(),
+            sbs_summary: SBSSummary::new(),
 
             // for profiling k-mer match rate in mapped reads
             consecutive_match_stats: FxHashMap::default(),
@@ -554,6 +557,9 @@ impl<'a> AlnStats<'a> {
                             //println!("Current consecutive match: {}", current_consec_match);
                         } else {
                             res.mismatches += 1;
+                            let query_base = u8::from(sequence[Position::new(query_pos).unwrap()])
+                                .to_ascii_uppercase();
+                            res.sbs_summary.update(c, query_base);
                             res.q_score_stats.increment(q_score as usize, false);
                             let (rps, rpe) = if strand_rev { (sequence.len() - query_pos + 1, query_pos) } else { (query_pos, sequence.len() - query_pos + 1) };
                             res.read_pos_stats.increment_mismatch(rps, rpe);
